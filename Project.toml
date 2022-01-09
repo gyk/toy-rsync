@@ -1,0 +1,7 @@
+name = "ToyRsync"
+uuid = "cbada33a-7803-40c3-98eb-a88cba775228"
+authors = ["Yukun Guo <gyk.net@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
