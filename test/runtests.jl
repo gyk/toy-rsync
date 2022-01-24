@@ -3,6 +3,8 @@ using Random: randstring
 
 using ToyRsync
 
+include("mutation.jl")
+
 @testset "Checksum" begin
     using ToyRsync:
         weak_checksum,
@@ -10,7 +12,10 @@ using ToyRsync
         weak_checksum_vec,
         rolling_checksum
 
-    len = BLOCK_SIZE * 4
+    BLOCK_SIZE = 128
+    N_BLOCKS = 32
+    len = BLOCK_SIZE * N_BLOCKS
+    r = RsyncContext(BLOCK_SIZE)
     data = rand(UInt8, len)
     (x, a, b) = weak_checksum_and_state(@view data[1:BLOCK_SIZE])
 
@@ -26,7 +31,7 @@ using ToyRsync
         else
             old = get(data, i - 1, UInt8(0))
             new = get(data, i - 1 + BLOCK_SIZE, UInt8(0))
-            (a, b) = rolling_checksum((a, b), (old, new), BLOCK_SIZE)
+            (a, b) = rolling_checksum(r, (a, b), (old, new))
             reinterpret(UInt8, [hton(UInt32(b) << 16 | a)])
         end
 
@@ -35,31 +40,40 @@ using ToyRsync
 end
 
 @testset "Smoke" begin
+    BLOCK_SIZE = 128
+    N_BLOCKS = 64
+    N_MUTATIONS = 4
+
+    r = RsyncContext(BLOCK_SIZE)
+
     # NOTE: Need padding if the length is not a multiple of block size.
-    src_data = randstring(BLOCK_SIZE * 4)
-    println(src_data[1+1:16+1], " ... ", src_data[(end - 16 + 1):end])
+    src_data = randstring(BLOCK_SIZE * N_BLOCKS)
+    println("Src = ", src_data[1:16], " ... ", src_data[(end - 16 + 1):end])
     src = IOBuffer(src_data)
 
     dst_data = copy(Vector{UInt8}(src_data))
-    dst_data[BLOCK_SIZE + 1] = UInt8('A')
-    dst_data[BLOCK_SIZE + 2] = UInt8('B')
-    dst_data[BLOCK_SIZE * 2 + 1] = UInt8('S')
-    dst_data[BLOCK_SIZE * 2 + 2] = UInt8('T')
-    dst_data[BLOCK_SIZE * 3 + 1] = UInt8('X')
-    dst_data[BLOCK_SIZE * 3 + 2] = UInt8('Y')
-    dst_data[BLOCK_SIZE * 3 + 3] = UInt8('Z')
+
+    mutations = rand([Insert, Delete, Replace], N_MUTATIONS)
+    println("Mutations = $mutations")
+    for m in mutations
+        mutate!(r, dst_data, m)
+    end
+
     dst = IOBuffer(dst_data)
 
-    hashes = compute_hashes(src)
-    seek(src, 1)
-    delta = compute_delta(src, hashes)
+    hashes = compute_hashes(r, dst)
+    seek(dst, 0)
+    src = IOBuffer(src_data)
+
+    delta = compute_delta(r, src, hashes)
+    println(delta)
 
     out = IOBuffer()
-    seek(src, 1)
-    patch_delta(src, out, delta)
+    seek(dst, 0)
+    patch_delta(r, dst, out, delta)
 
-    dst_data = String(take!(out))
-    println(dst_data[1:16], " ... ", dst_data[(end - 16 + 1):end])
+    dst_data2 = String(take!(out))
+    println("Dst = ", dst_data2[1:16], " ... ", dst_data2[(end - 16 + 1):end])
 
-    @test true # FIXME
+    @test src_data == dst_data2
 end
